@@ -1,155 +1,166 @@
+/**
+ * @fileoverview Primary gulp file.
+ */
+
 'use strict';
 
-var del = require('del');
-var minimist = require('minimist');
-var chalk = require('chalk');
-
-var knownOptions = {
-  string: ['lang', 'section'],
-  default: {
-    lang: null,
-    section: null
-  }
-};
-
-GLOBAL.WF = {
-  gae: 'appengine-config',
-  src: {
-    content: 'src/content',
-    jekyll: 'src/jekyll',
-    jekyllConfigs: 'src/jekyll/_config',
-    imgs: 'src/static/imgs',
-    styles: 'src/static/styles',
-    fonts: 'src/static/fonts',
-    scripts: 'src/static/scripts',
-    thirdParty: 'src/static/third_party'
-  },
-  build: {
-    root: 'build',
-    jekyll: 'build/langs',
-    imgs: 'build/imgs',
-    styles: 'build/styles',
-    fonts: 'build/fonts',
-    scripts: 'build/scripts'
-  }
-};
-GLOBAL.WF.options = minimist(process.argv.slice(2), knownOptions);
-
-console.log('');
-console.log('---------------------------------');
-console.log('');
-if (GLOBAL.WF.options.lang === null) {
-  console.log(chalk.dim('    Building all languages.'));
-  console.log(chalk.white('    Add ') +
-    chalk.magenta('--lang <Language Code>') +
-    chalk.white(' to build a specific language.'));
-} else {
-  console.log(chalk.dim('    Building language: ') +
-    chalk.white(GLOBAL.WF.options.lang));
-}
-console.log('');
-if (GLOBAL.WF.options.section === null) {
-  console.log(chalk.dim('    Building all sections.'));
-  console.log(chalk.white('    Add ') +
-    chalk.magenta('--section <Section Folder Name>') +
-    chalk.white(' to build a specific section.'));
-} else {
-  console.log(chalk.dim('    Building section: ') +
-    chalk.white(GLOBAL.WF.options.section));
-}
-console.log('');
-console.log('---------------------------------');
-console.log('');
-
-var gulp = require('gulp');
-var runSequence = require('run-sequence');
-var requireDir = require('require-dir');
+const del = require('del');
+const gulp = require('gulp');
+const chalk = require('chalk');
+const gutil = require('gulp-util');
+const minimist = require('minimist');
+const requireDir = require('require-dir');
 
 requireDir('./gulp-tasks');
+requireDir('./gulp-tasks/workbox');
+requireDir('./gulp-tasks/puppeteer');
 
-gulp.task('clean', del.bind(null,
-  [
-    GLOBAL.WF.build.root
-  ], {dot: true}));
+gutil.log('---------------------------------');
+gutil.log(`${chalk.dim('Web')}${chalk.bold('Fundamentals')} Gulp`);
+gutil.log('---------------------------------');
 
-gulp.task('removeIndexPage', del.bind(null,
-  [GLOBAL.WF.build.jekyll + '/*/index.html']));
+/** ***************************************************************************
+ * Global config
+ *****************************************************************************/
+global.WF = {
+  gae: 'appengine-config',
+  src: {
+    content: 'src/content/en/',
+    data: 'src/data/',
+    templates: 'src/templates/',
+  },
+  maxArticlesInFeed: 10,
+  minFeedDate: 2010,
+  langs: [
+    'en', 'ar', 'de', 'es', 'fr', 'he', 'hi', 'id', 'it', 'ja',
+    'ko', 'nl', 'pl', 'pt-br', 'ru', 'th', 'tr', 'vi', 'zh-cn', 'zh-tw',
+  ],
+};
 
-gulp.task('develop', function(cb) {
-  runSequence(
-    'clean',
-    [
-      'generate-dev-css',
-      'cp-images',
-      'cp-fonts',
-      'cp-scripts',
-    ],
-    'compile-jekyll:localhost',
-    'start-gae-dev-server',
-    'dev-watch-tasks',
-    cb);
-});
+/** ***************************************************************************
+ * Default options
+ *****************************************************************************/
+const defaultOptions = {
+  boolean: ['buildRSS', 'verbose', 'testAll', 'testTests', 'testWarnOnly'],
+  string: ['lang', 'buildType'],
+  default: {
+    lang: null,
+    verbose: false,
+    buildRSS: false,
+    buildType: 'dev',
+    testAll: false,
+    testTests: false,
+    testWarnOnly: false,
+  },
+};
 
-gulp.task('develop:prod', function(cb) {
-  runSequence(
-    'clean',
-    'tests',
-    [
-      'generate-prod-css',
-      'minify-images',
-      'cp-fonts',
-      'cp-scripts',
-    ],
-    'compile-jekyll:localhost',
-    [
-      'html',
-      'minify-images:content'
-    ],
-    'start-gae-dev-server',
-    'prod-watch-tasks',
-    cb);
-});
+/** ***************************************************************************
+ * Argument Parser
+ *****************************************************************************/
+// Parse arguments using minimist
+global.WF.options = minimist(process.argv.slice(2), defaultOptions);
 
-gulp.task('build:staging', function(cb) {
-  runSequence(
-    'clean',
-    'tests',
-    [
-      'generate-prod-css',
-      'minify-images',
-      'cp-fonts',
-      'cp-scripts',
-      'copy-appengine-config'
-    ],
-    'compile-jekyll:staging',
-    [
-      'html',
-      'minify-images:content'
-    ],
-    cb);
-});
+// What languages should it handle
+if (global.WF.options.lang) {
+  const langs = global.WF.options.lang.split(',');
+  langs.forEach(function(lang) {
+    if (global.WF.langs.indexOf(lang) === -1) {
+      const msg = `Language ${chalk.red(lang)} not supported.`;
+      gutil.log(' ', chalk.red('ERROR:'), msg);
+      process.exit(1);
+    }
+  });
+  global.WF.options.lang = langs;
+  gutil.log('Language: ', gutil.colors.cyan(global.WF.options.lang));
+} else {
+  global.WF.options.lang = global.WF.langs;
+}
 
-gulp.task('build', function(cb) {
-  runSequence(
-    'clean',
-    'tests',
-    [
-      'generate-prod-css',
-      'minify-images',
-      'cp-fonts',
-      'copy-appengine-config'
-    ],
-    'compile-jekyll:devsite',
-    [
-      'html',
-      'minify-images:content'
-    ],
-    'removeIndexPage',
-    cb);
+// Build RSS
+gutil.log('Build RSS Files:', gutil.colors.cyan(global.WF.options.buildRSS));
+
+// Show verbose output
+if (global.WF.options.verbose) {
+  gutil.log('Verbose: ', gutil.colors.cyan(global.WF.options.verbose));
+}
+
+// Test all files
+if (global.WF.options.testAll) {
+  gutil.log('testAll:', chalk.cyan('true'));
+}
+
+// Test test files
+if (global.WF.options.testTests) {
+  gutil.log('testTests:', chalk.cyan('true'));
+}
+
+// Warn only, no errors
+if (global.WF.options.testWarnOnly) {
+  gutil.log('testWarnOnly: ', gutil.colors.cyan('true'));
+}
+
+gutil.log('');
+
+/** ***************************************************************************
+ * Gulp Tasks
+ *****************************************************************************/
+
+/**
+ * Cleans any generated files.
+ */
+gulp.task('clean', function() {
+  const filesToDelete = [
+    'test-results.json',
+    'src/content/en/_shared/contributors/*',
+    'src/content/en/_shared/latest_*.html',
+    'src/content/**/rss.xml',
+    'src/content/**/atom.xml',
+    'src/content/**/_files.json',
+    'src/content/*/_index-latest-*.html',
+    'src/content/en/sitemap.xml',
+    'src/content/*/fundamentals/glossary.md',
+    'src/content/*/resources/contributors/*',
+    'src/content/*/showcase/_index.yaml',
+    'src/content/*/showcase/*/_toc.yaml',
+    'src/content/*/showcase/*/index.md',
+    'src/content/*/showcase/tags/*',
+    'src/content/*/shows/_index.yaml',
+    'src/content/*/shows/index.md',
+    'src/content/*/shows/**/feed.xml',
+    'src/content/*/shows/http203/podcast/index.md',
+    'src/content/*/shows/designer-vs-developer/podcast/index.md',
+    'src/content/*/tools/puppeteer/_src/**/*',
+    'src/content/*/updates/_index.yaml',
+    'src/content/*/updates/*/index.md',
+    'src/content/*/updates/tags/*',
+    'src/data/codelabs/*/*.md',
+    'src/data/codelabs/*/img/**',
+    'src/data/ilt-pwa/*/*.md',
+    'src/data/ilt-pwa/*/img/**',
+    '!src/content/*/**/_generated.md',
+  ];
+  const opts = {dryRun: false, dot: true};
+  const deletedFiles = del.sync(filesToDelete, opts);
+  gutil.log(' ', 'Deleted', chalk.magenta(deletedFiles.length + ' files'));
 });
 
 /**
- * By default we'll kick of the development
- * build of WF
- **/
-gulp.task('default', ['develop']);
+ * Shows help.
+ */
+gulp.task('default', function(cb) {
+  gutil.log(chalk.red('ERROR:'), 'no command specified.');
+  gutil.log('Usage: gulp <command> [arguments]');
+  gutil.log(' ', 'Commands:');
+  gutil.log('  ', chalk.cyan('build'), 'Builds all auto-generated files');
+  gutil.log('  ', chalk.cyan('clean'), 'Removes all auto-generated files');
+  gutil.log('  ', chalk.cyan('test'), 'Checks the files for any issues');
+  gutil.log(' ', 'Optional Arguments:');
+  const langDesc = 'Comma separated list of languages to use';
+  const langExamp = chalk.gray('eg: --lang=en,fr');
+  gutil.log('  ', chalk.cyan('--lang'), langDesc, langExamp);
+  gutil.log('  ', chalk.cyan('--buildRSS'), 'Build RSS/ATOM files');
+  gutil.log('  ', chalk.cyan('--verbose'), 'Log with verbose output');
+  gutil.log('  ', chalk.cyan('--testAll'), 'Test all files, not just open');
+  gutil.log('  ', chalk.cyan('--testTests'), 'Test the test files');
+  gutil.log('  ', chalk.cyan('--testWarnOnly'), 'Only throw warnings');
+});
